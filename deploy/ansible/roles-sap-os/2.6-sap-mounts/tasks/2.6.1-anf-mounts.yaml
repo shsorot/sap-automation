@@ -458,7 +458,7 @@
 # |                                                                            |
 # |                   Prepare the OS for running SAP HANA on                   |
 # |                   Azure NetApp Files with NFS                              |
-# |                                                                            |
+# |                   Except Scale out + ANF                                   |
 # +------------------------------------4--------------------------------------*/
 - name:                                "ANF Mount: Prepare the OS for running
                                         SAP HANA on Azure NetApp with NFS"
@@ -558,7 +558,7 @@
     - tier == 'sapos'
     - node_tier == 'hana'
 
-- name:                            "ANF Mount: Create /hana folder"
+- name:                                "ANF Mount: Create /hana folder"
   ansible.builtin.file:
     path:                          /hana
     mode:                          0755
@@ -568,6 +568,7 @@
     - tier == 'sapos'
     - node_tier == 'hana'
 
+# Note: This block ( and one for second DB note) must run only for stand alone HANA, or HSR - pacemaker HANA ( including scale out with HSR )
 - name:                                "ANF Mount: HANA data"
   ansible.builtin.include_tasks:       2.6.1.1-anf-mount.yaml
   loop:
@@ -575,7 +576,7 @@
       'type':              'data',
       'temppath':          'hanadata',
       'folder':            'hanadata',
-      'mount':             '{{ hana_data_mountpoint[0] }}',
+      'mount':             '{{ c[0] }}',
       'opts':              '{{ mnt_options }}',
       'path':              '/hana/data',
       'permissions':       '0755',
@@ -591,7 +592,9 @@
     - hana_data_mountpoint is defined
     - hana_data_mountpoint | length > 0
     - ansible_hostname == db_hosts[0]
-
+    # Not applicable if DB high availability is false/undefined and scale out is set to true/defined
+    - not (db_high_availability | default(false)  == false and scale_out | default(false) == true)
+      
 - name:                                "ANF Mount: HANA log"
   ansible.builtin.include_tasks:       2.6.1.1-anf-mount.yaml
   loop:
@@ -615,6 +618,8 @@
     - hana_log_mountpoint is defined
     - hana_log_mountpoint | length > 0
     - ansible_hostname == db_hosts[0]
+      # Not applicable if DB high availability is false/undefined and scale out is set to true/defined
+    - not (db_high_availability | default(false)  == false and scale_out | default(false) == true)
 
 - name:                                "ANF Mount: HANA shared"
   ansible.builtin.include_tasks:       2.6.1.1-anf-mount.yaml
@@ -639,6 +644,8 @@
     - hana_shared_mountpoint is defined
     - hana_shared_mountpoint | length > 0
     - ansible_hostname == db_hosts[0]
+    # Not applicable if DB high availability is false/undefined and scale out is set to true/defined
+    - not (db_high_availability | default(false)  == false and scale_out | default(false) == true)
 
 - name:                                "ANF Mount: HANA data (secondary)"
   ansible.builtin.include_tasks:       2.6.1.1-anf-mount.yaml
@@ -664,6 +671,8 @@
     - hana_data_mountpoint | length > 1
     - db_hosts | length == 2
     - ansible_hostname == db_hosts[1]
+    # Not applicable if DB high availability is false/undefined and scale out is set to true/defined
+    - not (db_high_availability | default(false)  == false and scale_out | default(false) == true)
 
 - name:                                "ANF Mount: HANA log (secondary)"
   ansible.builtin.include_tasks:       2.6.1.1-anf-mount.yaml
@@ -689,6 +698,8 @@
     - hana_log_mountpoint | length > 1
     - db_hosts | length ==2
     - ansible_hostname == db_hosts[1]
+    # Not applicable if DB high availability is false/undefined and scale out is set to true/defined
+    - not (db_high_availability | default(false)  == false and scale_out | default(false) == true)
 
 - name:                                "ANF Mount: HANA shared (secondary)"
   ansible.builtin.include_tasks:       2.6.1.1-anf-mount.yaml
@@ -714,6 +725,165 @@
     - hana_shared_mountpoint | length > 1
     - db_hosts | length == 2
     - ansible_hostname == db_hosts[1]
+    # Not applicable if DB high availability is false/undefined and scale out is set to true/defined
+    - not (db_high_availability | default(false)  == false and scale_out | default(false) == true)
+
+# /*---------------------------------------------------------------------------8
+# |                                                                            |
+# |                   Prepare the OS for running SAP HANA on                   |
+# |                   Azure NetApp Files with NFS                              |
+# |                   Scale out + ANF                                          |
+# +------------------------------------4--------------------------------------*/
+
+# FOR ANF mount on SLES and RHEl, the below tasks replicate the steps in the link https://learn.microsoft.com/en-us/azure/sap/workloads/sap-hana-scale-out-standby-netapp-files-suse#mount-the-azure-netapp-files-volumes 
+# Mount the HANA shared on to the temp path
+
+- name:                                "ANF Mount: Scale Out - Create SAP Directories (usrsap)"
+  ansible.builtin.file:
+    owner:                             "{{ db_sid | lower }}adm"
+    group:                             sapsys
+    mode:                              0755
+    path:                              "/usr/sap/{{ db_sid | upper}}"
+    state:                             directory
+  when:
+    - tier == 'hana'
+    - db_high_availability | default(false)  == false and scale_out | default(false) == true
+
+- name:                                "ANF Mount: Scale Out - Create SAP Directories (hana data)"
+  ansible.builtin.file:
+    owner:                             "{{ db_sid | lower }}adm"
+    group:                             sapsys
+    mode:                              0755
+    path:                              "/hana/data/{{ db_sid | upper}}"
+    state:                             directory
+  when:
+    - tier == 'hana'
+    - db_high_availability | default(false)  == false and scale_out | default(false) == true
+
+
+- name:                                "ANF Mount: Scale Out - Create SAP Directories (hana log)"
+  ansible.builtin.file:
+    owner:                             "{{ db_sid | lower }}adm"
+    group:                             sapsys
+    mode:                              0755
+    path:                              "/hana/log/{{ db_sid | upper}}"
+    state:                             directory
+  when:
+    - tier == 'hana'
+    - db_high_availability | default(false)  == false and scale_out | default(false) == true
+
+- name:                                "ANF Mount: HANA shared - Scale out"
+  ansible.builtin.include_tasks:       2.6.1.1-anf-mount.yaml
+  loop:
+    - {
+      'type':              'shared',
+      'temppath':          'shared',
+      # change folder to match the mount folder within the share
+      'folder':            'shared',
+      'mount':             '{{ hana_shared_mountpoint[0] }}',
+      'opts':              '{{ mnt_options }}',
+      'path':              '/hana/shared',
+      'permissions':       '0775',
+      'set_chattr_on_dir': false,
+      'target_nodes' :     ['hana'],
+      'create_temp_folders': true
+    }
+  vars:
+    # Run this on all the nodes, not just primary.
+    primary_host:                     "{{ ansible_hostname }}"
+  when:
+    - tier == 'sapos'
+    - node_tier == 'hana'
+    - hana_shared_mountpoint is defined
+    # Only first entry will be considered, rest ignored.
+    - hana_shared_mountpoint | length > 0
+    # - ansible_hostname == db_hosts[0]
+    # Applicable if DB high availability is false/undefined and scale out is set to true/defined
+    - db_high_availability | default(false)  == false and scale_out | default(false) == true
+
+# This runs for unique share per node
+- name:                                "ANF Mount: Usr Sap - Scale out"
+  ansible.builtin.include_tasks:       2.6.1.1-anf-mount.yaml
+  loop:
+    - {
+      'type':              'usrsap',
+      'temppath':          'usrsap',
+      'folder':            "usr-sap-hanadb{{ lookup('ansible.utils.index_of',db_hosts, ansible_hostname) }}",
+      'mount':             '{{ hana_shared_mountpoint[0] }}',
+      'opts':              '{{ mnt_options }}',
+      'path':              '/usr/sap{{ db_sid | upper }}',
+      'permissions':       '0775',
+      'set_chattr_on_dir': false,
+      'target_nodes' :     ['hana'],
+      'create_temp_folders': true
+    }
+  vars:
+    primary_host:                     "{{ ansible_hostname }}"
+  when:
+    - tier == 'sapos'
+    - node_tier == 'hana'
+    - hana_shared_mountpoint is defined
+    # Only first entry will be considered, rest ignored.
+    - hana_shared_mountpoint | length == 1
+    # - ansible_hostname == db_hosts[0]
+    # Applicable if DB high availability is false/undefined and scale out is set to true/defined
+    - db_high_availability | default(false)  == false and scale_out | default(false) == true
+
+- name:                                "ANF Mount: HANA Data - Scale out"
+  ansible.builtin.include_tasks:       2.6.1.1-anf-mount.yaml
+  loop:
+    - {
+      'type':              'data',
+      'temppath':          'hanadata',
+      'folder':            'hanadata',
+      'mount':             "{{ hana_data_mountpoint[{{ lookup('ansible.utils.index_of',db_hosts, ansible_hostname) }}] }}",
+      'opts':              '{{ mnt_options }}',
+      'path':              "/hana/data/{{ db_sid | upper }}/mnt0000{{ lookup('ansible.utils.index_of',db_hosts, ansible_hostname) }}",
+      'permissions':       '0775',
+      'set_chattr_on_dir': false,
+      'target_nodes' :     ['hana'],
+      'create_temp_folders': true
+    }
+  vars:
+    primary_host:                     "{{ ansible_hostname }}"
+  when:
+    - tier == 'sapos'
+    - node_tier == 'hana'
+    - hana_data_mountpoint is defined
+    # Only first entry will be considered, rest ignored.
+    - hana_data_mountpoint | length == db_hosts | length
+    # - ansible_hostname == db_hosts[0]
+    # Applicable if DB high availability is false/undefined and scale out is set to true/defined
+    - db_high_availability | default(false)  == false and scale_out | default(false) == true
+
+
+- name:                                "ANF Mount: HANA Log - Scale out"
+  ansible.builtin.include_tasks:       2.6.1.1-anf-mount.yaml
+  loop:
+    - {
+      'type':              'log',
+      'temppath':          'hanalog',
+      'folder':            'hanalog',
+      'mount':             "{{ hana_log_mountpoint[{{ lookup('ansible.utils.index_of',db_hosts, ansible_hostname) }}] }}",
+      'opts':              '{{ mnt_options }}',
+      'path':              "/hana/log/{{ db_sid | upper }}/mnt0000{{ lookup('ansible.utils.index_of',db_hosts, ansible_hostname) }}",
+      'permissions':       '0775',
+      'set_chattr_on_dir': false,
+      'target_nodes' :     ['hana'],
+      'create_temp_folders': true
+    }
+  vars:
+    primary_host:                     "{{ ansible_hostname }}"
+  when:
+    - tier == 'sapos'
+    - node_tier == 'hana'
+    - hana_log_mountpoint is defined
+    # Only first entry will be considered, rest ignored.
+    - hana_log_mountpoint | length == db_hosts | length
+    # - ansible_hostname == db_hosts[0]
+    # Applicable if DB high availability is false/undefined and scale out is set to true/defined
+    - db_high_availability | default(false)  == false and scale_out | default(false) == true
+
 
 - name:                                "ANF Mount: Set Permissons on HANA Directories ({{ item.path }})"
   ansible.builtin.file:
@@ -729,6 +899,5 @@
   when:
     - tier == 'sapos'
     - node_tier == 'hana'
-
 
 ...
